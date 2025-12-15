@@ -1,0 +1,12 @@
+Split: time_based_split(Time quantile=0.8)
+ROC-AUC: 0.9856
+PR-AUC:  0.7972
+
+              precision    recall  f1-score   support
+
+           0     0.9997    0.9999    0.9998     56887
+           1     0.9492    0.7467    0.8358        75
+
+    accuracy                         0.9996     56962
+   macro avg     0.9744    0.8733    0.9178     56962
+weighted avg     0.9996    0.9996    0.9996     56962
