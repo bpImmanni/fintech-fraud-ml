@@ -1,35 +1,58 @@
 import sys
 import os
-
-# Add project root to PYTHONPATH so `src` is importable
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if ROOT_DIR not in sys.path:
-    sys.path.append(ROOT_DIR)
-
+from pathlib import Path
 import json
 import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
 
+# -----------------------------
+# PATHS (Render-safe)
+# -----------------------------
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if ROOT_DIR not in sys.path:
+    sys.path.append(ROOT_DIR)
+
+BASE_DIR = Path(ROOT_DIR)
+
+MODEL_PATH = str(BASE_DIR / "models" / "fraud_model.pkl")
+SCHEMA_PATH = str(BASE_DIR / "reports" / "schema.json")
+SHAP_BG_PATH = str(BASE_DIR / "data" / "processed" / "shap_background.csv")
+DRIFT_BASELINE_PATH = str(BASE_DIR / "data" / "processed" / "train_baseline_sample.csv")
+
+# -----------------------------
+# IMPORTS FROM src
+# -----------------------------
 from src.explain import make_explainer, shap_values_for, top_k_reasons
 from src.drift import drift_report
 from src.feedback import init_db, write_feedback
 
-MODEL_PATH = "models/fraud_model.pkl"
-SCHEMA_PATH = "reports/schema.json"
-SHAP_BG_PATH = "data/processed/shap_background.csv"
-DRIFT_BASELINE_PATH = "data/processed/train_baseline_sample.csv"
-
+# -----------------------------
+# UI SETUP
+# -----------------------------
 st.set_page_config(page_title="FinTech Fraud Detector", layout="wide")
 st.title("FinTech Fraud Detector")
 st.write("Upload transactions CSV. If your file includes `Class`, the app will also show evaluation metrics.")
 
+
 @st.cache_resource
 def load_model():
+    if not os.path.exists(MODEL_PATH):
+        raise FileNotFoundError(
+            f"Model not found at: {MODEL_PATH}. "
+            "Make sure `models/fraud_model.pkl` is committed to GitHub."
+        )
     return joblib.load(MODEL_PATH)
 
-pipe = load_model()
+
+# Load model once
+try:
+    pipe = load_model()
+except Exception as e:
+    st.error(f"❌ App boot failed while loading model: {e}")
+    st.stop()
+
 
 tab_score, tab_health, tab_feedback = st.tabs(["Score", "Model Health (Drift)", "Feedback"])
 
@@ -42,7 +65,11 @@ with tab_score:
     if uploaded is None:
         st.info("Upload a CSV in this tab first. Then Drift + Feedback tabs will work automatically.")
     else:
-        df_in = pd.read_csv(uploaded)
+        try:
+            df_in = pd.read_csv(uploaded)
+        except Exception as e:
+            st.error(f"Could not read CSV: {e}")
+            st.stop()
 
         # Optional labels
         y_true = None
@@ -55,9 +82,13 @@ with tab_score:
 
         # Schema validation + enforce order
         if os.path.exists(SCHEMA_PATH):
-            with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
-                schema = json.load(f)
-            expected_cols = schema.get("columns", [])
+            try:
+                with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+                    schema = json.load(f)
+                expected_cols = schema.get("columns", [])
+            except Exception as e:
+                st.error(f"Failed to read schema.json: {e}")
+                st.stop()
 
             if expected_cols:
                 missing = [c for c in expected_cols if c not in df.columns]
@@ -72,20 +103,31 @@ with tab_score:
 
                 df = df[expected_cols]  # enforce column order
 
+        # Threshold slider
         threshold = st.slider("Fraud threshold", 0.0, 1.0, 0.50, 0.01, key="threshold")
 
-        proba = pipe.predict_proba(df)[:, 1]
+        # Predict
+        try:
+            proba = pipe.predict_proba(df)[:, 1]
+        except Exception as e:
+            st.error(
+                "Model prediction failed. Most common causes: wrong column order/types, "
+                "or missing columns.\n\n"
+                f"Error: {e}"
+            )
+            st.stop()
 
+        # Build results
         results = df.copy()
         results["fraud_probability"] = proba
         results["fraud_pred"] = (results["fraud_probability"] >= threshold).astype(int)
         results["risk_band"] = pd.cut(
             results["fraud_probability"],
             bins=[-0.01, 0.2, 0.7, 1.01],
-            labels=["LOW", "MEDIUM", "HIGH"]
+            labels=["LOW", "MEDIUM", "HIGH"],
         )
 
-        # Save session state IMMEDIATELY (fixes your issue)
+        # Save session state immediately (drift + feedback rely on this)
         st.session_state["live_df_for_drift"] = df.copy()
         st.session_state["latest_results"] = results.copy()
         st.session_state["has_scored"] = True
@@ -115,29 +157,31 @@ with tab_score:
 
         if show_explain:
             if not os.path.exists(SHAP_BG_PATH):
-                st.warning(f"Missing SHAP background file: `{SHAP_BG_PATH}`. Re-run `python src/train.py`.")
+                st.warning(f"Missing SHAP background file: `{SHAP_BG_PATH}`. (Optional) Re-run `python src/train.py`.")
             else:
-                bg = pd.read_csv(SHAP_BG_PATH)
-                bg = bg[[c for c in df.columns if c in bg.columns]]
+                try:
+                    bg = pd.read_csv(SHAP_BG_PATH)
+                    bg = bg[[c for c in df.columns if c in bg.columns]]
+                    explainer, scaler = make_explainer(pipe, bg)
 
-                explainer, scaler = make_explainer(pipe, bg)
+                    n_explain = st.slider("Rows to explain (for speed)", 10, 200, 50, 10, key="n_explain")
+                    explain_df = df.head(n_explain).copy()
 
-                n_explain = st.slider("Rows to explain (for speed)", 10, 200, 50, 10, key="n_explain")
-                explain_df = df.head(n_explain).copy()
+                    sv = shap_values_for(pipe, explainer, scaler, explain_df)
+                    feature_names = list(explain_df.columns)
 
-                sv = shap_values_for(pipe, explainer, scaler, explain_df)
-                feature_names = list(explain_df.columns)
+                    reasons = []
+                    for i in range(min(n_explain, sv.shape[0])):
+                        top3 = top_k_reasons(feature_names, sv[i], k=3)
+                        reasons.append(", ".join([f"{f} ({v:+.3f})" for f, v in top3]))
 
-                reasons = []
-                for i in range(min(n_explain, sv.shape[0])):
-                    top3 = top_k_reasons(feature_names, sv[i], k=3)
-                    reasons.append(", ".join([f"{f} ({v:+.3f})" for f, v in top3]))
-
-                results.loc[results.index[:len(reasons)], "top_reasons"] = reasons
-                st.dataframe(
-                    results[["fraud_probability", "risk_band", "top_reasons"]].head(n_explain),
-                    use_container_width=True
-                )
+                    results.loc[results.index[:len(reasons)], "top_reasons"] = reasons
+                    st.dataframe(
+                        results[["fraud_probability", "risk_band", "top_reasons"]].head(n_explain),
+                        use_container_width=True,
+                    )
+                except Exception as e:
+                    st.error(f"SHAP explanation failed: {e}")
 
         st.subheader("Scored Results (preview)")
         st.dataframe(results.head(50), use_container_width=True)
@@ -149,9 +193,8 @@ with tab_score:
             "Download Scored CSV",
             data=results.to_csv(index=False).encode("utf-8"),
             file_name="scored_transactions.csv",
-            mime="text/csv"
+            mime="text/csv",
         )
-
 
 # -----------------------------
 # DRIFT TAB
@@ -161,30 +204,32 @@ with tab_health:
     st.write("Compares uploaded data distribution vs a training baseline sample.")
 
     if not os.path.exists(DRIFT_BASELINE_PATH):
-        st.warning(f"Missing drift baseline file: `{DRIFT_BASELINE_PATH}`. Re-run `python src/train.py`.")
+        st.warning(f"Missing drift baseline file: `{DRIFT_BASELINE_PATH}`. (Optional) Re-run `python src/train.py`.")
     elif "live_df_for_drift" not in st.session_state:
         st.warning("No live data found yet. Go to Score tab, upload a CSV, then return here.")
     else:
-        live_df = st.session_state["live_df_for_drift"]
-        train_base = pd.read_csv(DRIFT_BASELINE_PATH)
+        try:
+            live_df = st.session_state["live_df_for_drift"]
+            train_base = pd.read_csv(DRIFT_BASELINE_PATH)
 
-        common_cols = [c for c in train_base.columns if c in live_df.columns]
-        train_base = train_base[common_cols]
-        live_df = live_df[common_cols]
+            common_cols = [c for c in train_base.columns if c in live_df.columns]
+            train_base = train_base[common_cols]
+            live_df = live_df[common_cols]
 
-        rep = drift_report(train_base, live_df, top_n=15)
+            rep = drift_report(train_base, live_df, top_n=15)
 
-        def status_tag(v):
-            if v < 0.1:
-                return "🟢 OK"
-            if v < 0.2:
-                return "🟡 Moderate"
-            return "🔴 High"
+            def status_tag(v):
+                if v < 0.1:
+                    return "🟢 OK"
+                if v < 0.2:
+                    return "🟡 Moderate"
+                return "🔴 High"
 
-        rep2 = rep.copy()
-        rep2["status"] = rep2["psi"].apply(status_tag)
-        st.dataframe(rep2, use_container_width=True)
-
+            rep2 = rep.copy()
+            rep2["status"] = rep2["psi"].apply(status_tag)
+            st.dataframe(rep2, use_container_width=True)
+        except Exception as e:
+            st.error(f"Drift report failed: {e}")
 
 # -----------------------------
 # FEEDBACK TAB
@@ -203,13 +248,11 @@ with tab_feedback:
         st.error(f"Feedback DB init failed: {e}")
         st.stop()
 
-
     if "latest_results" not in st.session_state:
         st.warning("No scored results found yet. Go to Score tab, upload a CSV, then return here.")
         st.stop()
 
     results_fb = st.session_state["latest_results"]
-
     st.dataframe(results_fb[["fraud_probability", "risk_band"]].head(20), use_container_width=True)
 
     max_idx = int(len(results_fb) - 1)
@@ -219,7 +262,7 @@ with tab_feedback:
         max_value=max_idx,
         value=0,
         step=1,
-        key="row_id"
+        key="row_id",
     )
 
     sel = results_fb.iloc[int(row_id)]
@@ -233,9 +276,15 @@ with tab_feedback:
 
     c1, c2 = st.columns(2)
     if c1.button("✅ Confirm Fraud", key="btn_confirm"):
-        write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "CONFIRM_FRAUD")
-        st.success("Saved feedback: CONFIRM_FRAUD")
+        try:
+            write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "CONFIRM_FRAUD")
+            st.success("Saved feedback: CONFIRM_FRAUD")
+        except Exception as e:
+            st.error(f"Failed to write feedback: {e}")
 
     if c2.button("❌ False Positive", key="btn_fp"):
-        write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "FALSE_POSITIVE")
-        st.success("Saved feedback: FALSE_POSITIVE")
+        try:
+            write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "FALSE_POSITIVE")
+            st.success("Saved feedback: FALSE_POSITIVE")
+        except Exception as e:
+            st.error(f"Failed to write feedback: {e}")
