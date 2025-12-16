@@ -200,9 +200,9 @@ with tab_feedback:
     try:
         init_db()
     except Exception as e:
-        st.error("Feedback storage is not available on this deployment.")
-        st.caption(f"Reason: {e}")
+        st.error(f"Feedback DB init failed: {e}")
         st.stop()
+
 
     if "latest_results" not in st.session_state:
         st.warning("No scored results found yet. Go to Score tab, upload a CSV, then return here.")
