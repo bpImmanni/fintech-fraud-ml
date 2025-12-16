@@ -3,56 +3,55 @@ import os
 from pathlib import Path
 import json
 import joblib
-import numpy as np
 import pandas as pd
 import streamlit as st
 
 # -----------------------------
-# PATHS (Render-safe)
+# Paths (ABSOLUTE, Render-safe)
 # -----------------------------
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if ROOT_DIR not in sys.path:
-    sys.path.append(ROOT_DIR)
+BASE_DIR = Path(__file__).resolve().parents[1]  # project root
+SRC_DIR = BASE_DIR / "src"
 
-BASE_DIR = Path(ROOT_DIR)
+# ensure `src` import works
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
-MODEL_PATH = str(BASE_DIR / "models" / "fraud_model.pkl")
-SCHEMA_PATH = str(BASE_DIR / "reports" / "schema.json")
-SHAP_BG_PATH = str(BASE_DIR / "data" / "processed" / "shap_background.csv")
-DRIFT_BASELINE_PATH = str(BASE_DIR / "data" / "processed" / "train_baseline_sample.csv")
+MODEL_PATH = BASE_DIR / "models" / "fraud_model.pkl"
+SCHEMA_PATH = BASE_DIR / "reports" / "schema.json"
+SHAP_BG_PATH = BASE_DIR / "data" / "processed" / "shap_background.csv"
+DRIFT_BASELINE_PATH = BASE_DIR / "data" / "processed" / "train_baseline_sample.csv"
 
 # -----------------------------
-# IMPORTS FROM src
+# Imports from your src/
 # -----------------------------
 from src.explain import make_explainer, shap_values_for, top_k_reasons
 from src.drift import drift_report
-from src.feedback import init_db, write_feedback
+from src.feedback import init_db, write_feedback, DB_PATH  # DB_PATH for debugging
 
 # -----------------------------
-# UI SETUP
+# Streamlit setup
 # -----------------------------
 st.set_page_config(page_title="FinTech Fraud Detector", layout="wide")
 st.title("FinTech Fraud Detector")
 st.write("Upload transactions CSV. If your file includes `Class`, the app will also show evaluation metrics.")
 
-
 @st.cache_resource
 def load_model():
-    if not os.path.exists(MODEL_PATH):
-        raise FileNotFoundError(
-            f"Model not found at: {MODEL_PATH}. "
-            "Make sure `models/fraud_model.pkl` is committed to GitHub."
-        )
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"Model not found at: {MODEL_PATH}")
     return joblib.load(MODEL_PATH)
 
+def safe_read_csv(uploaded_file) -> pd.DataFrame:
+    # robust CSV read (helps avoid crashes on Render)
+    try:
+        return pd.read_csv(uploaded_file)
+    except UnicodeDecodeError:
+        uploaded_file.seek(0)
+        return pd.read_csv(uploaded_file, encoding="latin-1")
+    except Exception as e:
+        raise RuntimeError(f"Failed to read CSV: {e}")
 
-# Load model once
-try:
-    pipe = load_model()
-except Exception as e:
-    st.error(f"❌ App boot failed while loading model: {e}")
-    st.stop()
-
+pipe = load_model()
 
 tab_score, tab_health, tab_feedback = st.tabs(["Score", "Model Health (Drift)", "Feedback"])
 
@@ -66,102 +65,94 @@ with tab_score:
         st.info("Upload a CSV in this tab first. Then Drift + Feedback tabs will work automatically.")
     else:
         try:
-            df_in = pd.read_csv(uploaded)
-        except Exception as e:
-            st.error(f"Could not read CSV: {e}")
-            st.stop()
+            df_in = safe_read_csv(uploaded)
 
-        # Optional labels
-        y_true = None
-        if "Class" in df_in.columns:
-            y_true = df_in["Class"].astype(int).values
-            df = df_in.drop(columns=["Class"])
-            st.info("Detected `Class` column. Evaluation metrics will be shown.")
-        else:
-            df = df_in.copy()
+            # Optional labels
+            y_true = None
+            if "Class" in df_in.columns:
+                y_true = df_in["Class"].astype(int).values
+                df = df_in.drop(columns=["Class"])
+                st.info("Detected `Class` column. Evaluation metrics will be shown.")
+            else:
+                df = df_in.copy()
 
-        # Schema validation + enforce order
-        if os.path.exists(SCHEMA_PATH):
-            try:
+            # Schema validation + enforce order
+            if SCHEMA_PATH.exists():
                 with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
                     schema = json.load(f)
                 expected_cols = schema.get("columns", [])
-            except Exception as e:
-                st.error(f"Failed to read schema.json: {e}")
-                st.stop()
 
-            if expected_cols:
-                missing = [c for c in expected_cols if c not in df.columns]
-                extra = [c for c in df.columns if c not in expected_cols]
+                if expected_cols:
+                    missing = [c for c in expected_cols if c not in df.columns]
+                    extra = [c for c in df.columns if c not in expected_cols]
 
-                if missing:
-                    st.error(f"Missing columns (showing first 15): {missing[:15]}")
-                    st.stop()
+                    if missing:
+                        st.error(f"Missing columns (first 15): {missing[:15]}")
+                        st.stop()
 
-                if extra:
-                    st.warning(f"Extra columns ignored (showing first 15): {extra[:15]}")
+                    if extra:
+                        st.warning(f"Extra columns ignored (first 15): {extra[:15]}")
 
-                df = df[expected_cols]  # enforce column order
+                    df = df[expected_cols]  # enforce exact column order
 
-        # Threshold slider
-        threshold = st.slider("Fraud threshold", 0.0, 1.0, 0.50, 0.01, key="threshold")
+            # Basic safety: avoid huge uploads killing free instances
+            max_rows = 200000
+            if len(df) > max_rows:
+                st.warning(f"Large file detected ({len(df)} rows). Scoring first {max_rows} rows for stability.")
+                df = df.head(max_rows)
+                if y_true is not None:
+                    y_true = y_true[:max_rows]
 
-        # Predict
-        try:
+            threshold = st.slider("Fraud threshold", 0.0, 1.0, 0.50, 0.01, key="threshold")
+
+            # Predict probabilities
             proba = pipe.predict_proba(df)[:, 1]
-        except Exception as e:
-            st.error(
-                "Model prediction failed. Most common causes: wrong column order/types, "
-                "or missing columns.\n\n"
-                f"Error: {e}"
+
+            # Build results
+            results = df.copy()
+            results["fraud_probability"] = proba
+            results["fraud_pred"] = (results["fraud_probability"] >= threshold).astype(int)
+            results["risk_band"] = pd.cut(
+                results["fraud_probability"],
+                bins=[-0.01, 0.2, 0.7, 1.01],
+                labels=["LOW", "MEDIUM", "HIGH"]
             )
-            st.stop()
 
-        # Build results
-        results = df.copy()
-        results["fraud_probability"] = proba
-        results["fraud_pred"] = (results["fraud_probability"] >= threshold).astype(int)
-        results["risk_band"] = pd.cut(
-            results["fraud_probability"],
-            bins=[-0.01, 0.2, 0.7, 1.01],
-            labels=["LOW", "MEDIUM", "HIGH"],
-        )
+            # Save session state immediately
+            st.session_state["live_df_for_drift"] = df.copy()
+            st.session_state["latest_results"] = results.copy()
+            st.session_state["has_scored"] = True
 
-        # Save session state immediately (drift + feedback rely on this)
-        st.session_state["live_df_for_drift"] = df.copy()
-        st.session_state["latest_results"] = results.copy()
-        st.session_state["has_scored"] = True
+            # Evaluation metrics if labels exist
+            if y_true is not None:
+                results["Class"] = y_true
 
-        # Evaluation metrics if labels exist
-        if y_true is not None:
-            results["Class"] = y_true
+                tp = int(((y_true == 1) & (results["fraud_pred"].values == 1)).sum())
+                fp = int(((y_true == 0) & (results["fraud_pred"].values == 1)).sum())
+                fn = int(((y_true == 1) & (results["fraud_pred"].values == 0)).sum())
+                tn = int(((y_true == 0) & (results["fraud_pred"].values == 0)).sum())
 
-            tp = int(((y_true == 1) & (results["fraud_pred"].values == 1)).sum())
-            fp = int(((y_true == 0) & (results["fraud_pred"].values == 1)).sum())
-            fn = int(((y_true == 1) & (results["fraud_pred"].values == 0)).sum())
-            tn = int(((y_true == 0) & (results["fraud_pred"].values == 0)).sum())
+                precision = tp / (tp + fp) if (tp + fp) else 0.0
+                recall = tp / (tp + fn) if (tp + fn) else 0.0
 
-            precision = tp / (tp + fp) if (tp + fp) else 0.0
-            recall = tp / (tp + fn) if (tp + fn) else 0.0
+                st.subheader("Evaluation (because `Class` exists in upload)")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Precision", f"{precision:.3f}")
+                c2.metric("Recall", f"{recall:.3f}")
+                c3.metric("TP / FP", f"{tp} / {fp}")
+                c4.metric("FN / TN", f"{fn} / {tn}")
 
-            st.subheader("Evaluation (because `Class` exists in upload)")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Precision", f"{precision:.3f}")
-            c2.metric("Recall", f"{recall:.3f}")
-            c3.metric("TP / FP", f"{tp} / {fp}")
-            c4.metric("FN / TN", f"{fn} / {tn}")
+            # SHAP explainability (optional)
+            st.subheader("Explainability (SHAP)")
+            show_explain = st.checkbox("Compute SHAP explanations (Top-3 reasons)", value=False, key="shap_toggle")
 
-        # SHAP explainability
-        st.subheader("Explainability (SHAP)")
-        show_explain = st.checkbox("Compute SHAP explanations (Top-3 reasons)", value=False, key="shap_toggle")
-
-        if show_explain:
-            if not os.path.exists(SHAP_BG_PATH):
-                st.warning(f"Missing SHAP background file: `{SHAP_BG_PATH}`. (Optional) Re-run `python src/train.py`.")
-            else:
-                try:
+            if show_explain:
+                if not SHAP_BG_PATH.exists():
+                    st.warning(f"Missing SHAP background file: `{SHAP_BG_PATH}`. Re-run `python src/train.py`.")
+                else:
                     bg = pd.read_csv(SHAP_BG_PATH)
                     bg = bg[[c for c in df.columns if c in bg.columns]]
+
                     explainer, scaler = make_explainer(pipe, bg)
 
                     n_explain = st.slider("Rows to explain (for speed)", 10, 200, 50, 10, key="n_explain")
@@ -178,23 +169,27 @@ with tab_score:
                     results.loc[results.index[:len(reasons)], "top_reasons"] = reasons
                     st.dataframe(
                         results[["fraud_probability", "risk_band", "top_reasons"]].head(n_explain),
-                        use_container_width=True,
+                        use_container_width=True
                     )
-                except Exception as e:
-                    st.error(f"SHAP explanation failed: {e}")
 
-        st.subheader("Scored Results (preview)")
-        st.dataframe(results.head(50), use_container_width=True)
+            st.subheader("Scored Results (preview)")
+            st.dataframe(results.head(50), use_container_width=True)
 
-        st.subheader("Risk Band Counts")
-        st.bar_chart(results["risk_band"].value_counts())
+            st.subheader("Risk Band Counts")
+            st.bar_chart(results["risk_band"].value_counts())
 
-        st.download_button(
-            "Download Scored CSV",
-            data=results.to_csv(index=False).encode("utf-8"),
-            file_name="scored_transactions.csv",
-            mime="text/csv",
-        )
+            st.download_button(
+                "Download Scored CSV",
+                data=results.to_csv(index=False).encode("utf-8"),
+                file_name="scored_transactions.csv",
+                mime="text/csv"
+            )
+
+        except Exception as e:
+            # IMPORTANT: prevent app crash (crash on Render => 502)
+            st.error("Scoring failed. See details below (this is what was causing 502).")
+            st.exception(e)
+            st.stop()
 
 # -----------------------------
 # DRIFT TAB
@@ -203,8 +198,8 @@ with tab_health:
     st.subheader("Drift Monitoring (PSI)")
     st.write("Compares uploaded data distribution vs a training baseline sample.")
 
-    if not os.path.exists(DRIFT_BASELINE_PATH):
-        st.warning(f"Missing drift baseline file: `{DRIFT_BASELINE_PATH}`. (Optional) Re-run `python src/train.py`.")
+    if not DRIFT_BASELINE_PATH.exists():
+        st.warning(f"Missing drift baseline file: `{DRIFT_BASELINE_PATH}`. Re-run `python src/train.py`.")
     elif "live_df_for_drift" not in st.session_state:
         st.warning("No live data found yet. Go to Score tab, upload a CSV, then return here.")
     else:
@@ -228,20 +223,20 @@ with tab_health:
             rep2 = rep.copy()
             rep2["status"] = rep2["psi"].apply(status_tag)
             st.dataframe(rep2, use_container_width=True)
+
         except Exception as e:
-            st.error(f"Drift report failed: {e}")
+            st.error("Drift computation failed.")
+            st.exception(e)
+            st.stop()
 
 # -----------------------------
 # FEEDBACK TAB
 # -----------------------------
 with tab_feedback:
     st.subheader("Analyst Feedback Loop (SQLite)")
-    st.write(
-        "Confirm fraud / mark false positives. "
-        "On cloud (Render), the DB must be stored in a writable path (usually `/tmp`)."
-    )
+    st.write("Confirm fraud / mark false positives. On Render the DB is stored in a writable temp path.")
+    st.caption(f"DB path: {DB_PATH}")
 
-    # Don't let DB init crash the whole app on Render
     try:
         init_db()
     except Exception as e:
@@ -262,7 +257,7 @@ with tab_feedback:
         max_value=max_idx,
         value=0,
         step=1,
-        key="row_id",
+        key="row_id"
     )
 
     sel = results_fb.iloc[int(row_id)]
@@ -280,11 +275,13 @@ with tab_feedback:
             write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "CONFIRM_FRAUD")
             st.success("Saved feedback: CONFIRM_FRAUD")
         except Exception as e:
-            st.error(f"Failed to write feedback: {e}")
+            st.error("Failed to save feedback.")
+            st.exception(e)
 
     if c2.button("❌ False Positive", key="btn_fp"):
         try:
             write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "FALSE_POSITIVE")
             st.success("Saved feedback: FALSE_POSITIVE")
         except Exception as e:
-            st.error(f"Failed to write feedback: {e}")
+            st.error("Failed to save feedback.")
+            st.exception(e)
