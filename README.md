@@ -4,9 +4,9 @@ An end-to-end fraud detection system for card transactions:
 - **Model**: XGBoost classifier
 - **UI**: Streamlit (CSV upload → fraud probability + risk band)
 - **API**: FastAPI `/score` endpoint for batch scoring
-- **Explainability**: SHAP top reasons (optional)
+- **Explainability**: SHAP top reasons
 - **Monitoring**: Drift detection (PSI) vs training baseline
-- **Ops**: MLflow experiment tracking (optional), Docker + Compose
+- **Ops**: MLflow experiment tracking, Docker + Compose
 
 ## Demo
 - Streamlit UI: (add link after deploy)
