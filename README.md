@@ -25,7 +25,7 @@ requirements.txt
 
 ## Run locally
 
-### 1) Create env + install
+### Create env + install
 ```bash
 python -m venv .venv
 # Windows:
@@ -34,13 +34,9 @@ pip install -r requirements.txt
 python src/train.py
 streamlit run app/app.py
 uvicorn src.api:app --reload --host 0.0.0.0 --port 8000
-POST /score with JSON:
+# POST /score with JSON:
 {"records":[{"Time":0,"V1":...,"V28":...,"Amount":149.62}]}
-Notes
-
-Raw dataset and large outputs are intentionally excluded from GitHub.
-
-Folder structure is preserved using .gitkeep.
+# Folder structure is preserved using .gitkeep.
 
 
 Commit/push:
