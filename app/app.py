@@ -18,12 +18,12 @@ IS_RENDER = (
 MAX_ROWS_SCORE = 10000 if IS_RENDER else 200000        # max rows to score
 MAX_ROWS_STATE = 2000 if IS_RENDER else 20000          # max rows stored in session_state
 MAX_ROWS_SHAP = 100 if IS_RENDER else 200              # shap cap
+MAX_ROWS_DOWNLOAD_RENDER = 10000                       # max rows allowed to download on Render
 
 # -----------------------------
 # Paths (ABSOLUTE, Render-safe)
 # -----------------------------
 BASE_DIR = Path(__file__).resolve().parents[1]  # project root
-SRC_DIR = BASE_DIR / "src"
 
 # ensure `src` import works
 if str(BASE_DIR) not in sys.path:
@@ -39,7 +39,7 @@ DRIFT_BASELINE_PATH = BASE_DIR / "data" / "processed" / "train_baseline_sample.c
 # -----------------------------
 from src.explain import make_explainer, shap_values_for, top_k_reasons
 from src.drift import drift_report
-from src.feedback import init_db, write_feedback, DB_PATH  # DB_PATH for debugging
+from src.feedback import init_db, write_feedback, DB_PATH
 
 # -----------------------------
 # Streamlit setup
@@ -58,7 +58,6 @@ def load_model():
     return joblib.load(MODEL_PATH)
 
 def safe_read_csv(uploaded_file) -> pd.DataFrame:
-    # robust CSV read (helps avoid crashes on Render)
     try:
         return pd.read_csv(uploaded_file)
     except UnicodeDecodeError:
@@ -68,10 +67,9 @@ def safe_read_csv(uploaded_file) -> pd.DataFrame:
         raise RuntimeError(f"Failed to read CSV: {e}")
 
 def downcast_numeric(df: pd.DataFrame) -> pd.DataFrame:
-    # Reduce RAM significantly
+    # Reduce RAM significantly (safe for numeric features)
     for c in df.columns:
         if pd.api.types.is_numeric_dtype(df[c]):
-            # float -> float32, int -> int32
             if pd.api.types.is_float_dtype(df[c]):
                 df[c] = df[c].astype("float32")
             elif pd.api.types.is_integer_dtype(df[c]):
@@ -108,6 +106,7 @@ with tab_score:
                 with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
                     schema = json.load(f)
                 expected_cols = schema.get("columns", [])
+
                 if expected_cols:
                     missing = [c for c in expected_cols if c not in df.columns]
                     extra = [c for c in df.columns if c not in expected_cols]
@@ -178,7 +177,11 @@ with tab_score:
             if IS_RENDER:
                 st.caption("SHAP is limited on Render to prevent memory crashes.")
 
-            show_explain = st.checkbox("Compute SHAP explanations (Top-3 reasons)", value=False, key="shap_toggle")
+            show_explain = st.checkbox(
+                "Compute SHAP explanations (Top-3 reasons)",
+                value=False,
+                key="shap_toggle"
+            )
 
             if show_explain:
                 if not SHAP_BG_PATH.exists():
@@ -189,7 +192,14 @@ with tab_score:
 
                     explainer, scaler = make_explainer(pipe, bg)
 
-                    n_explain = st.slider("Rows to explain (for speed)", 10, MAX_ROWS_SHAP, 50, 10, key="n_explain")
+                    n_explain = st.slider(
+                        "Rows to explain (for speed)",
+                        10,
+                        MAX_ROWS_SHAP,
+                        min(50, MAX_ROWS_SHAP),
+                        10,
+                        key="n_explain"
+                    )
                     explain_df = df.head(n_explain).copy()
 
                     sv = shap_values_for(pipe, explainer, scaler, explain_df)
@@ -200,7 +210,6 @@ with tab_score:
                         top3 = top_k_reasons(feature_names, sv[i], k=3)
                         reasons.append(", ".join([f"{f} ({v:+.3f})" for f, v in top3]))
 
-                    # attach reasons only to first n rows
                     results.loc[results.index[:len(reasons)], "top_reasons"] = reasons
 
                     st.dataframe(
@@ -208,25 +217,48 @@ with tab_score:
                         use_container_width=True,
                     )
 
+            # Preview (Render-safe: only 50 rows, join is lighter than concat)
             st.subheader("Scored Results (preview)")
-            st.dataframe(pd.concat([results, df.head(len(results))], axis=1).head(50), use_container_width=True)
+            preview = results.head(50).join(df.head(50), how="left")
+            st.dataframe(preview, use_container_width=True)
 
             st.subheader("Risk Band Counts")
             st.bar_chart(results["risk_band"].value_counts())
 
-            # Download full scored file (df + results)
-            scored_out = pd.concat([df.reset_index(drop=True), results.reset_index(drop=True)], axis=1)
+            # -----------------------------
+            # Download (Render-safe)
+            # -----------------------------
+            st.subheader("Download")
+
+            download_mode = st.radio(
+                "Choose download format",
+                ["Results only (recommended)", "Results + input features (may be larger)"],
+                index=0 if IS_RENDER else 1,
+                key="download_mode",
+            )
+
+            if download_mode == "Results only (recommended)":
+                out_df = results.copy()
+            else:
+                # df is already capped by MAX_ROWS_SCORE
+                out_df = pd.concat(
+                    [df.reset_index(drop=True), results.reset_index(drop=True)],
+                    axis=1
+                )
+
+            if IS_RENDER and len(out_df) > MAX_ROWS_DOWNLOAD_RENDER:
+                st.warning(f"Render memory-safe mode: downloading first {MAX_ROWS_DOWNLOAD_RENDER} rows only.")
+                out_df = out_df.head(MAX_ROWS_DOWNLOAD_RENDER)
 
             st.download_button(
                 "Download Scored CSV",
-                data=scored_out.to_csv(index=False).encode("utf-8"),
+                data=out_df.to_csv(index=False).encode("utf-8"),
                 file_name="scored_transactions.csv",
                 mime="text/csv",
             )
 
         except Exception as e:
-            # IMPORTANT: prevent app crash (crash on Render => 502)
-            st.error("Scoring failed. See details below (this is what was causing 502).")
+            st.error("Scoring failed. See details below (this was causing 502).")
             st.exception(e)
             st.stop()
 
@@ -309,6 +341,7 @@ with tab_feedback:
     )
 
     c1, c2 = st.columns(2)
+
     if c1.button("✅ Confirm Fraud", key="btn_confirm"):
         try:
             write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "CONFIRM_FRAUD")
