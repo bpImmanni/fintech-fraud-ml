@@ -1,30 +1,47 @@
+import os
 import sqlite3
 from datetime import datetime
 
-DB_PATH = "data/processed/feedback.db"
+# Render-safe writable location
+DB_PATH = os.getenv("FEEDBACK_DB_PATH", "/tmp/feedback.db")
 
 def init_db():
-    con = sqlite3.connect(DB_PATH)
-    cur = con.cursor()
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS feedback (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      ts TEXT,
-      row_index INTEGER,
-      fraud_probability REAL,
-      risk_band TEXT,
-      decision TEXT
-    )
-    """)
-    con.commit()
-    con.close()
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
 
-def write_feedback(row_index: int, prob: float, risk: str, decision: str):
-    con = sqlite3.connect(DB_PATH)
-    cur = con.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            row_index INTEGER,
+            fraud_probability REAL,
+            risk_band TEXT,
+            label TEXT,
+            created_at TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def write_feedback(row_index, fraud_probability, risk_band, label):
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
     cur.execute(
-        "INSERT INTO feedback(ts,row_index,fraud_probability,risk_band,decision) VALUES (?,?,?,?,?)",
-        (datetime.utcnow().isoformat(), row_index, float(prob), str(risk), str(decision))
+        """
+        INSERT INTO feedback (row_index, fraud_probability, risk_band, label, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            row_index,
+            fraud_probability,
+            risk_band,
+            label,
+            datetime.utcnow().isoformat()
+        )
     )
-    con.commit()
-    con.close()
+
+    conn.commit()
+    conn.close()

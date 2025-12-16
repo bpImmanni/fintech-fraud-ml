@@ -191,34 +191,51 @@ with tab_health:
 # -----------------------------
 with tab_feedback:
     st.subheader("Analyst Feedback Loop (SQLite)")
-    st.write("Confirm fraud / mark false positives. Feedback is stored in `data/processed/feedback.db`.")
+    st.write(
+        "Confirm fraud / mark false positives. "
+        "On cloud (Render), the DB must be stored in a writable path (usually `/tmp`)."
+    )
 
-    init_db()
+    # Don't let DB init crash the whole app on Render
+    try:
+        init_db()
+    except Exception as e:
+        st.error("Feedback storage is not available on this deployment.")
+        st.caption(f"Reason: {e}")
+        st.stop()
 
     if "latest_results" not in st.session_state:
         st.warning("No scored results found yet. Go to Score tab, upload a CSV, then return here.")
-    else:
-        results_fb = st.session_state["latest_results"]
+        st.stop()
 
-        st.dataframe(results_fb[["fraud_probability", "risk_band"]].head(20), use_container_width=True)
+    results_fb = st.session_state["latest_results"]
 
-        max_idx = int(len(results_fb) - 1)
-        row_id = st.number_input("Pick a row index to review", min_value=0, max_value=max_idx, value=0, step=1, key="row_id")
+    st.dataframe(results_fb[["fraud_probability", "risk_band"]].head(20), use_container_width=True)
 
-        sel = results_fb.iloc[int(row_id)]
-        st.write(
-            {
-                "row_index": int(row_id),
-                "fraud_probability": float(sel["fraud_probability"]),
-                "risk_band": str(sel["risk_band"]),
-            }
-        )
+    max_idx = int(len(results_fb) - 1)
+    row_id = st.number_input(
+        "Pick a row index to review",
+        min_value=0,
+        max_value=max_idx,
+        value=0,
+        step=1,
+        key="row_id"
+    )
 
-        c1, c2 = st.columns(2)
-        if c1.button("✅ Confirm Fraud", key="btn_confirm"):
-            write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "CONFIRM_FRAUD")
-            st.success("Saved feedback: CONFIRM_FRAUD")
+    sel = results_fb.iloc[int(row_id)]
+    st.write(
+        {
+            "row_index": int(row_id),
+            "fraud_probability": float(sel["fraud_probability"]),
+            "risk_band": str(sel["risk_band"]),
+        }
+    )
 
-        if c2.button("❌ False Positive", key="btn_fp"):
-            write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "FALSE_POSITIVE")
-            st.success("Saved feedback: FALSE_POSITIVE")
+    c1, c2 = st.columns(2)
+    if c1.button("✅ Confirm Fraud", key="btn_confirm"):
+        write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "CONFIRM_FRAUD")
+        st.success("Saved feedback: CONFIRM_FRAUD")
+
+    if c2.button("❌ False Positive", key="btn_fp"):
+        write_feedback(int(row_id), float(sel["fraud_probability"]), str(sel["risk_band"]), "FALSE_POSITIVE")
+        st.success("Saved feedback: FALSE_POSITIVE")
