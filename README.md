@@ -47,10 +47,10 @@ XGBoost Model
 ↓  
 Fraud Probability + Risk Band  
 ↓  
-┌─────────────┬─────────────┬─────────────┐
-│ Explainable │ Drift (PSI) │ Analyst │
-│ AI (SHAP) │ Monitoring │ Feedback DB │
-└─────────────┴─────────────┴─────────────┘
+┌─────────────┬─────────────┬─────────────┐  
+│ Explainable │ Drift (PSI) │ Analyst │  
+│ AI (SHAP) │ Monitoring │ Feedback DB │  
+└─────────────┴─────────────┴─────────────┘  
 
 
 ---
