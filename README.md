@@ -109,4 +109,63 @@ python -m venv .venv
 source .venv/bin/activate   # Mac / Linux
 .venv\Scripts\activate      # Windows
 pip install -r requirements.txt
+```
 
+### 2️⃣ Train Model
+```bash
+python src/train.py
+```
+
+### 3️⃣ Launch App
+```bash
+streamlit run app/app.py
+```
+
+## ☁️ Cloud Deployment (Streamlit)
+
+This project is deployed on Streamlit Cloud with:
+
+Memory-safe row limits
+
+On-demand scoring & downloads
+
+Disabled auto-reruns
+
+SQLite stored in writable temp storage
+
+🔗 Live App
+👉 https://fintech-fraud-ml.streamlit.app/
+
+
+## ⚠️ Design Decisions (Why This Works in Production)
+
+Manual “Run Scoring” button avoids accidental recomputation
+
+Row caps prevent out-of-memory crashes
+
+Session-state minimization for cloud stability
+
+On-demand CSV generation instead of auto downloads
+
+SHAP guarded to prevent instance restarts
+
+SQLite feedback designed for future retraining loops
+
+## 🚀 Future Enhancements
+
+1. 🔄 Automated retraining using analyst feedback
+
+2. 📡 API service for real-time scoring
+
+3. 🧪 Model versioning & rollback
+
+4. 📊 Dashboard-level monitoring (Prometheus / Evidently)
+
+5. 🔐 Auth + role-based access
+
+
+👨‍💻 Author
+
+Bhanu Prakash Immanni
+ML Engineer | FinTech & Analytics
+🔗 https://www.linkedin.com/in/bpimmanni/ / GitHub
