@@ -72,31 +72,31 @@ Fraud Probability + Risk Band
 
 ## 📁 Project Structure
 
-fintech-fraud-ml/
-│
-├── app/
-│ └── app.py # Streamlit UI
-│
-├── src/
-│ ├── train.py # Model training
-│ ├── drift.py # PSI drift detection
-│ ├── explain.py # SHAP logic
-│ ├── feedback.py # SQLite feedback store
-│
-├── models/
-│ └── fraud_model.pkl # Trained model
-│
-├── data/
-│ └── processed/
-│ ├── train_baseline_sample.csv
-│ ├── shap_background.csv
-│
-├── reports/
-│ └── schema.json # Feature schema
-│
-├── requirements.txt
-├── README.md
-└── .gitignore
+fintech-fraud-ml/  
+│  
+├── app/  
+│ └── app.py # Streamlit UI  
+│  
+├── src/  
+│ ├── train.py # Model training  
+│ ├── drift.py # PSI drift detection  
+│ ├── explain.py # SHAP logic  
+│ ├── feedback.py # SQLite feedback store  
+│  
+├── models/  
+│ └── fraud_model.pkl # Trained model  
+│  
+├── data/  
+│ └── processed/  
+│ ├── train_baseline_sample.csv  
+│ ├── shap_background.csv  
+│  
+├── reports/  
+│ └── schema.json # Feature schema  
+│  
+├── requirements.txt  
+├── README.md  
+└── .gitignore  
 
 
 ---
