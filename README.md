@@ -39,14 +39,14 @@ A **production-grade fraud detection platform** for card transactions, combining
 
 ## 🏗️ Architecture Overview
 
-CSV Upload
-↓
-Schema Validation
-↓
-XGBoost Model
-↓
-Fraud Probability + Risk Band
-↓
+CSV Upload  
+↓  
+Schema Validation  
+↓  
+XGBoost Model  
+↓  
+Fraud Probability + Risk Band  
+↓  
 ┌─────────────┬─────────────┬─────────────┐
 │ Explainable │ Drift (PSI) │ Analyst │
 │ AI (SHAP) │ Monitoring │ Feedback DB │
