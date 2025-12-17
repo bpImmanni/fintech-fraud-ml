@@ -168,4 +168,4 @@ SQLite feedback designed for future retraining loops
 
 Bhanu Prakash Immanni
 ML Engineer | FinTech & Analytics
-🔗 https://www.linkedin.com/in/bpimmanni/ / GitHub
+🔗 https://www.linkedin.com/in/bpimmanni/ / https://github.com/bpImmanni
