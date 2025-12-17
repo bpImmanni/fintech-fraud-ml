@@ -1,18 +1,16 @@
 import os
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 
-# Render-safe writable path (ephemeral but works)
-DEFAULT_DB = "/tmp/feedback.db"
-DB_PATH = os.environ.get("FEEDBACK_DB_PATH", DEFAULT_DB)
+# Default location inside repo
+DEFAULT_DB = Path("data") / "processed" / "feedback.db"
+DB_PATH = Path(os.environ.get("FEEDBACK_DB_PATH", str(DEFAULT_DB)))
 
 def init_db():
-    # Ensure folder exists if someone sets FEEDBACK_DB_PATH to a nested path
-    db_dir = os.path.dirname(DB_PATH)
-    if db_dir and not os.path.exists(db_dir):
-        os.makedirs(db_dir, exist_ok=True)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
+    con = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     cur = con.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS feedback (
@@ -28,7 +26,7 @@ def init_db():
     con.close()
 
 def write_feedback(row_index: int, fraud_probability: float, risk_band: str, action: str):
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
+    con = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     cur = con.cursor()
     cur.execute("""
         INSERT INTO feedback (created_at, row_index, fraud_probability, risk_band, action)

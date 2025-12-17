@@ -1,44 +1,40 @@
-# --------------------
-# Virtual environment
-# --------------------
+# -----------------------------
+# Python / Virtual env
+# -----------------------------
 .venv/
 venv/
-
-# --------------------
-# Python cache
-# --------------------
 __pycache__/
 *.pyc
 
-# --------------------
+# -----------------------------
 # Pytest
-# --------------------
+# -----------------------------
 .pytest_cache/
 
-# --------------------
+# -----------------------------
 # MLflow
-# --------------------
+# -----------------------------
 mlruns/
 
-# --------------------
-# OS files
-# --------------------
+# -----------------------------
+# OS junk
+# -----------------------------
 .DS_Store
 Thumbs.db
 
-# --------------------
-# Data & large outputs
-# (DO NOT commit datasets or generated CSVs)
-# --------------------
-data/raw/
-data/processed/
+# -----------------------------
+# DATA (ignore by default)
+# -----------------------------
+data/**
 *.csv
 
-# --------------------
-# Keep folder structure
-# --------------------
-!data/raw/.gitkeep
+# -----------------------------
+# ALLOW small, required files
+# -----------------------------
+!data/processed/
 !data/processed/.gitkeep
-
 !data/processed/train_baseline_sample.csv
 !data/processed/shap_background.csv
+
+# If you want to keep SQLite out of git:
+data/processed/*.db
