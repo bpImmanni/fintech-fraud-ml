@@ -39,3 +39,6 @@ data/processed/
 # --------------------
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+
+!data/processed/train_baseline_sample.csv
+!data/processed/shap_background.csv
