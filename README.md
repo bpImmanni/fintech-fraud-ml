@@ -1,125 +1,112 @@
-📊 FinTech Fraud Detector (End-to-End ML App)
+# 🚨 FinTech Fraud Detector — End-to-End ML System
 
-A production-ready fraud detection system for credit-card transactions, built with machine learning + analytics tooling, and deployed on Streamlit Cloud with memory-safe design.
+A **production-grade fraud detection platform** for card transactions, combining  
+**machine learning, explainability, monitoring, and analyst feedback** — delivered through a scalable Streamlit application.
 
-🔗 Live Demo:
+🔗 **Live Demo**  
 👉 https://fintech-fraud-ml.streamlit.app/
 
+---
 
-🚀 What this project does
+## ✨ Key Features
 
-Upload a transactions CSV
+### 🔍 Fraud Scoring
+- Upload transaction CSV files
+- Predict **fraud probability** per transaction
+- Assign **risk bands**: `LOW / MEDIUM / HIGH`
+- Adjustable fraud threshold
 
-Get fraud probability + risk band per transaction
+### 📊 Model Evaluation (Optional)
+- Automatically detects `Class` label if present
+- Displays **Precision, Recall, TP / FP / FN / TN**
 
-Optionally evaluate performance if labels are present
+### 🧠 Explainability (SHAP)
+- Top-3 feature contributions per transaction
+- Optimized for memory-safe execution
+- Disabled by default on cloud to prevent crashes
 
-Monitor data drift (PSI) vs training baseline
+### 📈 Drift Monitoring
+- Population Stability Index (PSI)
+- Compares live data vs training baseline
+- Highlights **distribution shift risks**
 
-Capture analyst feedback (Confirm Fraud / False Positive)
+### 📝 Analyst Feedback Loop
+- Confirm Fraud / Mark False Positive
+- Stored safely using **SQLite**
+- Designed for future model retraining pipelines
 
-Explain predictions using SHAP (resource-safe mode)
+---
 
-This project demonstrates real-world ML deployment constraints (memory limits, safe reruns, UI-driven scoring) — not just offline modeling.
+## 🏗️ Architecture Overview
 
-
-🧠 Model & ML Details
-
-Model: Gradient-boosted tree classifier (XGBoost-style pipeline)
-
-Features: PCA-transformed transaction features (V1–V28, Amount, Time)
-
-Output:
-
-fraud_probability
-
-risk_band: LOW / MEDIUM / HIGH
-
-Evaluation (if Class column exists):
-
-Precision
-
-Recall
-
-TP / FP / FN / TN
-
-
-🖥️ User Interface (Streamlit)
-Tabs
-
-Score
-
-CSV upload
-
-Manual Run Scoring button (prevents crashes)
-
-Preview results
-
-On-demand CSV download (memory-safe)
-
-Optional SHAP explanations (limited rows)
-
-Model Health (Drift)
-
-Population Stability Index (PSI)
-
-Compares live data vs training baseline
-
-Feedback
-
-Analyst confirmation loop
-
-Stores feedback in SQLite (local /tmp DB)
+CSV Upload
+↓
+Schema Validation
+↓
+XGBoost Model
+↓
+Fraud Probability + Risk Band
+↓
+┌─────────────┬─────────────┬─────────────┐
+│ Explainable │ Drift (PSI) │ Analyst │
+│ AI (SHAP) │ Monitoring │ Feedback DB │
+└─────────────┴─────────────┴─────────────┘
 
 
-🧩 Explainability (SHAP)
+---
 
-Shows top-3 feature contributions
+## 🧪 Tech Stack
 
-Disabled by default on cloud
+| Layer | Technology |
+|-----|-----------|
+| Model | XGBoost |
+| UI | Streamlit |
+| Explainability | SHAP |
+| Drift Monitoring | PSI |
+| Storage | SQLite |
+| Serialization | Joblib |
+| Deployment | Streamlit Cloud |
+| Language | Python |
 
-Hard-capped rows to prevent memory restarts
+---
 
-Demonstrates practical explainability under infra constraints
+## 📁 Project Structure
 
-
-📈 Drift Monitoring
-
-Uses PSI (Population Stability Index)
-
-Baseline sampled from training data
-
-Flags:
-
-🟢 OK
-
-🟡 Moderate drift
-
-🔴 High drift
-
-
-
-🗂️ Project Structure
 fintech-fraud-ml/
+│
 ├── app/
-│   └── app.py              # Streamlit application
+│ └── app.py # Streamlit UI
+│
 ├── src/
-│   ├── train.py            # Model training
-│   ├── drift.py            # PSI drift logic
-│   ├── explain.py          # SHAP helpers
-│   ├── feedback.py         # SQLite feedback loop
-│   └── api.py              # (optional / local only)
+│ ├── train.py # Model training
+│ ├── drift.py # PSI drift detection
+│ ├── explain.py # SHAP logic
+│ ├── feedback.py # SQLite feedback store
+│
 ├── models/
-│   └── fraud_model.pkl     # Trained model
-├── reports/
-│   └── schema.json         # Expected feature schema
+│ └── fraud_model.pkl # Trained model
+│
 ├── data/
-│   └── processed/
-│       ├── train_baseline_sample.csv
-│       ├── shap_background.csv
-│       └── .gitkeep
+│ └── processed/
+│ ├── train_baseline_sample.csv
+│ ├── shap_background.csv
+│
+├── reports/
+│ └── schema.json # Feature schema
+│
 ├── requirements.txt
 ├── README.md
 └── .gitignore
 
+
+---
+
+## ▶️ Run Locally
+
+### 1️⃣ Setup Environment
+```bash
+python -m venv .venv
+source .venv/bin/activate   # Mac / Linux
+.venv\Scripts\activate      # Windows
+pip install -r requirements.txt
 
